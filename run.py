@@ -114,7 +114,32 @@ if __name__ == "__main__":
         "--outdir",
         type=str,
         default="out/",
-    )    
+    )
+    # add arguments about frequency modulation
+    parser.add_argument(
+        "--freq_modulate",
+        action="store_true",
+        help="whether to modulate the frequency",
+    )
+    parser.add_argument(
+        "--freq_type",
+        type=str,
+        default="bilinear",
+        choices=["bilinear", "GaussianBlur", "bilateralFilter", "bicubic"],
+        help="whether to modulate the frequency",
+    )
+    parser.add_argument(
+        "--kernel_size",
+        type=int,
+        default=9,
+        help="kernel size",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=1234,
+        help="seed for random",
+    )
     args = parser.parse_args()
     
 
@@ -156,5 +181,9 @@ if __name__ == "__main__":
     Image.fromarray(np_imgs).save(args.outdir+"pixel_images.png")
     Image.fromarray(np_xyzs).save(args.outdir+"xyz_images.png")
 
-    glb_path, obj_path = generate3d(model, np_imgs, np_xyzs, "cuda")
+    glb_path, obj_path = generate3d(model, np_imgs, np_xyzs, freq_modulate=None, freq_type=args.freq_type, kernel_size=args.kernel_size, device="cuda")
     shutil.copy(obj_path, args.outdir+"output3d.zip")
+
+    if args.freq_modulate:
+        glb_path, obj_path = generate3d(model, np_imgs, np_xyzs, freq_modulate=args.freq_modulate, freq_type=args.freq_type, kernel_size=args.kernel_size, device="cuda")
+        shutil.copy(obj_path, args.outdir+f"output3d_{args.freq_type}_{args.kernel_size}.zip")
