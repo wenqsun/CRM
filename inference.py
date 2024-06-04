@@ -6,7 +6,8 @@ from util.utils import get_tri
 import tempfile
 from mesh import Mesh
 import zipfile
-def generate3d(model, rgb, ccm, device):
+import cv2
+def generate3d(model, rgb, ccm, freq_modulate, freq_type, kernel_size, device):
 
     color_tri = torch.from_numpy(rgb)/255
     xyz_tri = torch.from_numpy(ccm[:,:,(2,1,0)])/255
@@ -49,6 +50,10 @@ def generate3d(model, rgb, ccm, device):
     else:
         triplane_feature2 = model.unet2(triplane)
         
+    original_triplane = triplane_feature2
+    if freq_modulate:
+        triplane_feature2 = fre_modulate(triplane_feature2, freq_type, kernel_size)
+        triplane_feature2 = torch.from_numpy(triplane_feature2).unsqueeze(0).to(device)
 
     with torch.no_grad():
         data_config = {
@@ -70,7 +75,7 @@ def generate3d(model, rgb, ccm, device):
     start_time = time.time()
     with torch.no_grad():
         mesh_path_obj = tempfile.NamedTemporaryFile(suffix=f"", delete=False).name
-        model.export_mesh_wt_uv(glctx, data_config, mesh_path_obj, "", device, res=(1024,1024), tri_fea_2=triplane_feature2)
+        model.export_mesh_wt_uv(glctx, data_config, mesh_path_obj, "", device, res=(1024,1024), tri_fea_2=original_triplane)
 
         mesh = Mesh.load(mesh_path_obj+".obj", bound=0.9, front_dir="+z")
         mesh_path_glb = tempfile.NamedTemporaryFile(suffix=f"", delete=False).name
@@ -89,3 +94,32 @@ def generate3d(model, rgb, ccm, device):
     elapsed_time = end_time - start_time
     print(f"uv takes {elapsed_time}s")
     return mesh_path_glb+".glb", mesh_path_obj+'.zip'
+
+def fre_modulate(triplanes, freq_type="bilateralFilter", kernel_size=9):
+    """
+    Input: [1, 32, 256, 768]
+    """
+    triplanes = triplanes.cpu().numpy()
+    triplanes = triplanes[0]      # [32, 256, 768]
+    triplane_list = []
+    for i in range(3):
+        triplane_list.append(triplanes[:,:,256*i:256*(i+1)])
+    triplane = np.stack(triplane_list, axis=0)
+    triplane = np.reshape(triplane, (3, 32, 256, 256))
+    print(triplane.shape)
+    for i in range(triplane.shape[0]):
+        sub_triplane = triplane[i]  # 32, 256, 256
+        for j in range(sub_triplane.shape[0]):
+            img = sub_triplane[j]
+            if freq_type == "GaussianBlur":
+                img = cv2.GaussianBlur(img, (kernel_size, kernel_size), 0)
+            elif freq_type == "bilateralFilter":
+                img = img.astype(np.float32)
+                img = cv2.bilateralFilter(img, kernel_size, 75, 75)
+            sub_triplane[j] = img
+        triplane[i] = sub_triplane
+
+    for i in range(3):
+        triplanes[:, :, 256*i:256*(i+1)] = triplane[i]
+
+    return triplanes
